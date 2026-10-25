@@ -1,6 +1,6 @@
-import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import bcrypt from 'bcryptjs';
 import {
   RestaurantSettings,
@@ -21,562 +21,6 @@ import {
   INITIAL_DELIVERY_ZONES,
 } from './seed-data';
 
-// Ensure data directory exists
-const dataDir = path.join(process.cwd(), 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
-const dbPath = path.join(dataDir, 'trp.db');
-
-// Global database connection singleton
-let dbInstance: Database.Database | null = null;
-
-export function getDb(): Database.Database {
-  if (!dbInstance) {
-    dbInstance = new Database(dbPath);
-    dbInstance.pragma('journal_mode = WAL');
-    dbInstance.pragma('foreign_keys = ON');
-    initDatabase(dbInstance);
-  }
-  return dbInstance;
-}
-
-function initDatabase(db: Database.Database) {
-  // 1. Restaurant Settings
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS restaurant_settings (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      tagline TEXT NOT NULL,
-      headline TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      whatsapp_number TEXT NOT NULL,
-      address TEXT NOT NULL,
-      opening_hours TEXT NOT NULL,
-      is_open INTEGER NOT NULL DEFAULT 1,
-      announcement TEXT,
-      easypaisa_title TEXT,
-      easypaisa_number TEXT,
-      jazzcash_title TEXT,
-      jazzcash_number TEXT,
-      cod_enabled INTEGER NOT NULL DEFAULT 1,
-      online_payment_enabled INTEGER NOT NULL DEFAULT 1,
-      currency TEXT NOT NULL DEFAULT 'PKR',
-      currency_symbol TEXT NOT NULL DEFAULT 'Rs. ',
-      facebook_url TEXT,
-      instagram_url TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  // 2. Categories
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS categories (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      slug TEXT NOT NULL UNIQUE,
-      description TEXT,
-      image_url TEXT,
-      display_order INTEGER NOT NULL DEFAULT 0,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  // 3. Products
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS products (
-      id TEXT PRIMARY KEY,
-      category_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      slug TEXT NOT NULL UNIQUE,
-      description TEXT,
-      price REAL NOT NULL,
-      image_url TEXT,
-      is_available INTEGER NOT NULL DEFAULT 1,
-      is_featured INTEGER NOT NULL DEFAULT 0,
-      discount_percent REAL NOT NULL DEFAULT 0,
-      display_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
-    );
-  `);
-
-  // 4. Product Variants
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS product_variants (
-      id TEXT PRIMARY KEY,
-      product_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      price_modifier REAL NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-    );
-  `);
-
-  // 5. Product Addons
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS product_addons (
-      id TEXT PRIMARY KEY,
-      product_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      price REAL NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-    );
-  `);
-
-  // 6. Delivery Zones
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS delivery_zones (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      fee REAL NOT NULL,
-      estimated_time TEXT NOT NULL,
-      min_order REAL NOT NULL DEFAULT 0,
-      is_active INTEGER NOT NULL DEFAULT 1
-    );
-  `);
-
-  // 7. Orders
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id TEXT PRIMARY KEY,
-      order_number TEXT NOT NULL UNIQUE,
-      customer_name TEXT NOT NULL,
-      customer_phone TEXT NOT NULL,
-      delivery_type TEXT NOT NULL,
-      delivery_address TEXT,
-      delivery_zone_id TEXT,
-      delivery_zone_name TEXT,
-      delivery_fee REAL NOT NULL DEFAULT 0,
-      subtotal REAL NOT NULL,
-      discount REAL NOT NULL DEFAULT 0,
-      total REAL NOT NULL,
-      payment_method TEXT NOT NULL,
-      payment_status TEXT NOT NULL DEFAULT 'Cash on Delivery',
-      order_status TEXT NOT NULL DEFAULT 'Pending',
-      notes TEXT,
-      transaction_ref TEXT,
-      payment_proof_url TEXT,
-      tracking_token TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_orders_phone ON orders(customer_phone);
-    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(order_status);
-    CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
-  `);
-
-  // 8. Order Items
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS order_items (
-      id TEXT PRIMARY KEY,
-      order_id TEXT NOT NULL,
-      product_id TEXT NOT NULL,
-      product_name TEXT NOT NULL,
-      price REAL NOT NULL,
-      quantity INTEGER NOT NULL,
-      variant_name TEXT,
-      addons_json TEXT,
-      line_total REAL NOT NULL,
-      FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
-  `);
-
-  // 9. Admin Users
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS admin_users (
-      id TEXT PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'admin',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      last_login TEXT
-    );
-  `);
-
-  // 10. Audit Logs
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id TEXT PRIMARY KEY,
-      admin_id TEXT NOT NULL,
-      admin_email TEXT NOT NULL,
-      action TEXT NOT NULL,
-      details TEXT NOT NULL,
-      ip_address TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  seedInitialData(db);
-}
-
-function seedInitialData(db: Database.Database) {
-  // Seed Settings
-  const settingsCount = (db.prepare('SELECT count(*) as count FROM restaurant_settings').get() as { count: number }).count;
-  if (settingsCount === 0) {
-    db.prepare(`
-      INSERT INTO restaurant_settings (
-        id, name, tagline, headline, phone, whatsapp_number, address, opening_hours,
-        is_open, announcement, easypaisa_title, easypaisa_number, jazzcash_title, jazzcash_number,
-        cod_enabled, online_payment_enabled, currency, currency_symbol, facebook_url, instagram_url
-      ) VALUES (
-        @id, @name, @tagline, @headline, @phone, @whatsapp_number, @address, @opening_hours,
-        @is_open, @announcement, @easypaisa_title, @easypaisa_number, @jazzcash_title, @jazzcash_number,
-        @cod_enabled, @online_payment_enabled, @currency, @currency_symbol, @facebook_url, @instagram_url
-      )
-    `).run(INITIAL_SETTINGS);
-  }
-
-  // Seed Categories
-  const catCount = (db.prepare('SELECT count(*) as count FROM categories').get() as { count: number }).count;
-  if (catCount === 0) {
-    const insertCat = db.prepare(`
-      INSERT INTO categories (id, name, slug, description, image_url, display_order, is_active)
-      VALUES (@id, @name, @slug, @description, @image_url, @display_order, @is_active)
-    `);
-    const insertMany = db.transaction((categories: typeof INITIAL_CATEGORIES) => {
-      for (const cat of categories) {
-        insertCat.run(cat);
-      }
-    });
-    insertMany(INITIAL_CATEGORIES);
-  }
-
-  // Seed Products
-  const prodCount = (db.prepare('SELECT count(*) as count FROM products').get() as { count: number }).count;
-  if (prodCount === 0) {
-    // Map category slugs to IDs
-    const cats = db.prepare('SELECT id, slug FROM categories').all() as { id: string; slug: string }[];
-    const catMap = new Map(cats.map(c => [c.slug, c.id]));
-
-    const insertProd = db.prepare(`
-      INSERT INTO products (
-        id, category_id, name, slug, description, price, image_url,
-        is_available, is_featured, discount_percent, display_order
-      ) VALUES (
-        @id, @category_id, @name, @slug, @description, @price, @image_url,
-        @is_available, @is_featured, @discount_percent, @display_order
-      )
-    `);
-
-    const insertProds = db.transaction((items: typeof INITIAL_PRODUCTS) => {
-      let idx = 1;
-      for (const item of items) {
-        const catId = catMap.get(item.category_slug) || cats[0].id;
-        const slug = item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + idx;
-        insertProd.run({
-          id: `prod_${idx}`,
-          category_id: catId,
-          name: item.name,
-          slug,
-          description: item.description,
-          price: item.price,
-          image_url: item.image_url,
-          is_available: 1,
-          is_featured: item.is_featured,
-          discount_percent: 0,
-          display_order: idx,
-        });
-        idx++;
-      }
-    });
-    insertProds(INITIAL_PRODUCTS);
-  }
-
-  // Seed Delivery Zones
-  const zoneCount = (db.prepare('SELECT count(*) as count FROM delivery_zones').get() as { count: number }).count;
-  if (zoneCount === 0) {
-    const insertZone = db.prepare(`
-      INSERT INTO delivery_zones (id, name, fee, estimated_time, min_order, is_active)
-      VALUES (@id, @name, @fee, @estimated_time, @min_order, @is_active)
-    `);
-    const insertZones = db.transaction((zones: typeof INITIAL_DELIVERY_ZONES) => {
-      for (const z of zones) {
-        insertZone.run(z);
-      }
-    });
-    insertZones(INITIAL_DELIVERY_ZONES);
-  }
-
-  // Seed Initial Admin User
-  const adminCount = (db.prepare('SELECT count(*) as count FROM admin_users').get() as { count: number }).count;
-  if (adminCount === 0) {
-    const email = process.env.ADMIN_EMAIL || 'admin@trp.com';
-    const rawPass = process.env.ADMIN_PASSWORD || 'RollPalace#2026!';
-    const hash = bcrypt.hashSync(rawPass, 10);
-    db.prepare(`
-      INSERT INTO admin_users (id, email, password_hash, name, role)
-      VALUES (?, ?, ?, ?, ?)
-    `).run('usr_admin_1', email, hash, 'TRP Restaurant Manager', 'super_admin');
-  }
-}
-
-// ----------------- Data Access Helpers -----------------
-
-export function getRestaurantSettings(): RestaurantSettings {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM restaurant_settings LIMIT 1').get() as any;
-  if (!row) return INITIAL_SETTINGS as any;
-  return {
-    ...row,
-    is_open: Boolean(row.is_open),
-    cod_enabled: Boolean(row.cod_enabled),
-    online_payment_enabled: Boolean(row.online_payment_enabled),
-  };
-}
-
-export function updateRestaurantSettings(data: Partial<RestaurantSettings>): void {
-  const db = getDb();
-  const current = getRestaurantSettings();
-  const updated = { ...current, ...data, updated_at: new Date().toISOString() };
-
-  db.prepare(`
-    UPDATE restaurant_settings SET
-      name = @name, tagline = @tagline, headline = @headline, phone = @phone,
-      whatsapp_number = @whatsapp_number, address = @address, opening_hours = @opening_hours,
-      is_open = @is_open, announcement = @announcement, easypaisa_title = @easypaisa_title,
-      easypaisa_number = @easypaisa_number, jazzcash_title = @jazzcash_title,
-      jazzcash_number = @jazzcash_number, cod_enabled = @cod_enabled,
-      online_payment_enabled = @online_payment_enabled, currency = @currency,
-      currency_symbol = @currency_symbol, facebook_url = @facebook_url,
-      instagram_url = @instagram_url, updated_at = @updated_at
-    WHERE id = @id
-  `).run({
-    ...updated,
-    is_open: updated.is_open ? 1 : 0,
-    cod_enabled: updated.cod_enabled ? 1 : 0,
-    online_payment_enabled: updated.online_payment_enabled ? 1 : 0,
-  });
-}
-
-export function getCategories(onlyActive = false): Category[] {
-  const db = getDb();
-  let query = 'SELECT * FROM categories';
-  if (onlyActive) {
-    query += ' WHERE is_active = 1';
-  }
-  query += ' ORDER BY display_order ASC, name ASC';
-  const rows = db.prepare(query).all() as any[];
-  return rows.map(r => ({ ...r, is_active: Boolean(r.is_active) }));
-}
-
-export function getCategoryById(id: string): Category | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(id) as any;
-  if (!row) return null;
-  return { ...row, is_active: Boolean(row.is_active) };
-}
-
-export function createCategory(cat: { name: string; slug: string; description?: string; image_url?: string; display_order?: number; is_active?: boolean }): Category {
-  const db = getDb();
-  const id = 'cat_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-  const now = new Date().toISOString();
-  db.prepare(`
-    INSERT INTO categories (id, name, slug, description, image_url, display_order, is_active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    cat.name,
-    cat.slug,
-    cat.description || '',
-    cat.image_url || '',
-    cat.display_order || 0,
-    cat.is_active !== false ? 1 : 0,
-    now,
-    now
-  );
-  return getCategoryById(id)!;
-}
-
-export function updateCategory(id: string, cat: Partial<Category>): Category | null {
-  const db = getDb();
-  const existing = getCategoryById(id);
-  if (!existing) return null;
-  const now = new Date().toISOString();
-  const updated = { ...existing, ...cat, updated_at: now };
-  db.prepare(`
-    UPDATE categories SET
-      name = @name,
-      slug = @slug,
-      description = @description,
-      image_url = @image_url,
-      display_order = @display_order,
-      is_active = @is_active,
-      updated_at = @updated_at
-    WHERE id = @id
-  `).run({
-    ...updated,
-    is_active: updated.is_active ? 1 : 0,
-  });
-  return getCategoryById(id);
-}
-
-export function deleteCategory(id: string): boolean {
-  const db = getDb();
-  const res = db.prepare('DELETE FROM categories WHERE id = ?').run(id);
-  return res.changes > 0;
-}
-
-
-export function getProducts(options?: {
-  categoryId?: string;
-  categorySlug?: string;
-  onlyAvailable?: boolean;
-  featuredOnly?: boolean;
-  search?: string;
-}): Product[] {
-  const db = getDb();
-  let sql = `
-    SELECT p.*, c.name as category_name
-    FROM products p
-    JOIN categories c ON p.category_id = c.id
-    WHERE 1=1
-  `;
-  const params: any[] = [];
-
-  if (options?.categoryId) {
-    sql += ' AND p.category_id = ?';
-    params.push(options.categoryId);
-  }
-  if (options?.categorySlug) {
-    sql += ' AND c.slug = ?';
-    params.push(options.categorySlug);
-  }
-  if (options?.onlyAvailable) {
-    sql += ' AND p.is_available = 1 AND c.is_active = 1';
-  }
-  if (options?.featuredOnly) {
-    sql += ' AND p.is_featured = 1';
-  }
-  if (options?.search) {
-    sql += ' AND (p.name LIKE ? OR p.description LIKE ?)';
-    params.push(`%${options.search}%`, `%${options.search}%`);
-  }
-
-  sql += ' ORDER BY p.display_order ASC, p.name ASC';
-  const rows = db.prepare(sql).all(...params) as any[];
-  return rows.map(r => ({
-    ...r,
-    is_available: Boolean(r.is_available),
-    is_featured: Boolean(r.is_featured),
-  }));
-}
-
-export function getProductById(id: string): Product | null {
-  const db = getDb();
-  const row = db.prepare(`
-    SELECT p.*, c.name as category_name
-    FROM products p
-    JOIN categories c ON p.category_id = c.id
-    WHERE p.id = ?
-  `).get(id) as any;
-
-  if (!row) return null;
-  return {
-    ...row,
-    is_available: Boolean(row.is_available),
-    is_featured: Boolean(row.is_featured),
-  };
-}
-
-export function createProduct(prod: Omit<Product, 'id' | 'created_at' | 'updated_at'>): Product {
-  const db = getDb();
-  const id = 'prod_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-  const now = new Date().toISOString();
-  db.prepare(`
-    INSERT INTO products (
-      id, category_id, name, slug, description, price, image_url,
-      is_available, is_featured, discount_percent, display_order, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    prod.category_id,
-    prod.name,
-    prod.slug,
-    prod.description || '',
-    prod.price,
-    prod.image_url || '',
-    prod.is_available ? 1 : 0,
-    prod.is_featured ? 1 : 0,
-    prod.discount_percent || 0,
-    prod.display_order || 0,
-    now,
-    now
-  );
-  return getProductById(id)!;
-}
-
-export function updateProduct(id: string, prod: Partial<Product>): Product | null {
-  const db = getDb();
-  const existing = getProductById(id);
-  if (!existing) return null;
-
-  const now = new Date().toISOString();
-  const updated = { ...existing, ...prod, updated_at: now };
-
-  db.prepare(`
-    UPDATE products SET
-      category_id = @category_id,
-      name = @name,
-      slug = @slug,
-      description = @description,
-      price = @price,
-      image_url = @image_url,
-      is_available = @is_available,
-      is_featured = @is_featured,
-      discount_percent = @discount_percent,
-      display_order = @display_order,
-      updated_at = @updated_at
-    WHERE id = @id
-  `).run({
-    id,
-    category_id: updated.category_id || existing.category_id,
-    name: updated.name || existing.name,
-    slug: updated.slug || existing.slug,
-    description: updated.description ?? existing.description ?? '',
-    price: updated.price !== undefined && !isNaN(Number(updated.price)) ? Number(updated.price) : existing.price,
-    image_url: updated.image_url ?? existing.image_url ?? '',
-    is_available: updated.is_available ? 1 : 0,
-    is_featured: updated.is_featured ? 1 : 0,
-    discount_percent: updated.discount_percent !== undefined && !isNaN(Number(updated.discount_percent)) ? Number(updated.discount_percent) : (existing.discount_percent || 0),
-    display_order: updated.display_order !== undefined && !isNaN(Number(updated.display_order)) ? Number(updated.display_order) : (existing.display_order || 0),
-    updated_at: now,
-  });
-
-  return getProductById(id);
-}
-
-export function deleteProduct(id: string): boolean {
-  const db = getDb();
-  const result = db.prepare('DELETE FROM products WHERE id = ?').run(id);
-  return result.changes > 0;
-}
-
-export function getDeliveryZones(onlyActive = true): DeliveryZone[] {
-  const db = getDb();
-  let sql = 'SELECT * FROM delivery_zones';
-  if (onlyActive) sql += ' WHERE is_active = 1';
-  sql += ' ORDER BY fee ASC';
-  const rows = db.prepare(sql).all() as any[];
-  return rows.map(r => ({ ...r, is_active: Boolean(r.is_active) }));
-}
-
-export function getDeliveryZoneById(id: string): DeliveryZone | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM delivery_zones WHERE id = ?').get(id) as any;
-  if (!row) return null;
-  return { ...row, is_active: Boolean(row.is_active) };
-}
-
-// ----------------- Orders & Checkout -----------------
-
 export interface CreateOrderInput {
   customer_name: string;
   customer_phone: string;
@@ -595,33 +39,407 @@ export interface CreateOrderInput {
   }[];
 }
 
+interface StoreData {
+  settings: RestaurantSettings;
+  categories: Category[];
+  products: Product[];
+  delivery_zones: DeliveryZone[];
+  orders: Order[];
+  admin_users: (AdminUser & { password_hash: string })[];
+  audit_logs: AdminAuditLog[];
+}
+
+// ----------------- Storage File Path Resolution -----------------
+
+function getStoragePath(): string {
+  // 1. Try local data directory if writable
+  try {
+    const localDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(localDir)) {
+      fs.mkdirSync(localDir, { recursive: true });
+    }
+    const testFile = path.join(localDir, '.write_test');
+    fs.writeFileSync(testFile, '1');
+    fs.unlinkSync(testFile);
+    return path.join(localDir, 'trp_store.json');
+  } catch {
+    // 2. Fall back to OS temp directory (writable in Netlify/AWS Lambda)
+    try {
+      const tmpDir = os.tmpdir();
+      return path.join(tmpDir, 'trp_store.json');
+    } catch {
+      return '';
+    }
+  }
+}
+
+function initDefaultStore(): StoreData {
+  const now = new Date().toISOString();
+
+  // 1. Categories
+  const categories: Category[] = INITIAL_CATEGORIES.map((c) => ({
+    ...c,
+    description: c.description || '',
+    image_url: c.image_url || '',
+    display_order: c.display_order || 0,
+    is_active: Boolean(c.is_active),
+    created_at: now,
+    updated_at: now,
+  }));
+
+  const catMap = new Map(categories.map((c) => [c.slug, c.id]));
+  const defaultCatId = categories[0]?.id || 'cat_1';
+
+  // 2. Products
+  let idx = 1;
+  const products: Product[] = INITIAL_PRODUCTS.map((item) => {
+    const catId = catMap.get(item.category_slug) || defaultCatId;
+    const catObj = categories.find((c) => c.id === catId);
+    const slug =
+      item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') +
+      '-' +
+      idx;
+
+    const p: Product = {
+      id: `prod_${idx}`,
+      category_id: catId,
+      category_name: catObj?.name || '',
+      name: item.name,
+      slug,
+      description: item.description || '',
+      price: item.price,
+      image_url: item.image_url || '',
+      is_available: true,
+      is_featured: Boolean(item.is_featured),
+      discount_percent: 0,
+      display_order: idx,
+      created_at: now,
+      updated_at: now,
+    };
+    idx++;
+    return p;
+  });
+
+  // 3. Settings
+  const settings: RestaurantSettings = {
+    ...INITIAL_SETTINGS,
+    is_open: true,
+    cod_enabled: true,
+    online_payment_enabled: true,
+    announcement: INITIAL_SETTINGS.announcement || '',
+    easypaisa_title: INITIAL_SETTINGS.easypaisa_title || '',
+    easypaisa_number: INITIAL_SETTINGS.easypaisa_number || '',
+    jazzcash_title: INITIAL_SETTINGS.jazzcash_title || '',
+    jazzcash_number: INITIAL_SETTINGS.jazzcash_number || '',
+    facebook_url: INITIAL_SETTINGS.facebook_url || '',
+    instagram_url: INITIAL_SETTINGS.instagram_url || '',
+    updated_at: now,
+  };
+
+  // 4. Delivery Zones
+  const delivery_zones: DeliveryZone[] = INITIAL_DELIVERY_ZONES.map((z) => ({
+    ...z,
+    min_order: z.min_order || 0,
+    is_active: Boolean(z.is_active),
+  }));
+
+  // 5. Admin User
+  const email = process.env.ADMIN_EMAIL || 'admin@trp.com';
+  const rawPass = process.env.ADMIN_PASSWORD || 'RollPalace#2026!';
+  const hash = bcrypt.hashSync(rawPass, 10);
+  const admin_users: (AdminUser & { password_hash: string })[] = [
+    {
+      id: 'usr_admin_1',
+      email,
+      password_hash: hash,
+      name: 'TRP Restaurant Manager',
+      role: 'super_admin',
+      created_at: now,
+      last_login: null as any,
+    },
+  ];
+
+  return {
+    settings,
+    categories,
+    products,
+    delivery_zones,
+    orders: [],
+    admin_users,
+    audit_logs: [],
+  };
+}
+
+let storeInstance: StoreData | null = null;
+
+function getStore(): StoreData {
+  if (!storeInstance) {
+    const filePath = getStoragePath();
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.products) && parsed.products.length > 0) {
+          storeInstance = parsed;
+        }
+      } catch (err) {
+        console.warn('Could not read existing store from disk, initializing default:', err);
+      }
+    }
+    if (!storeInstance) {
+      storeInstance = initDefaultStore();
+      saveStore(storeInstance);
+    }
+  }
+  return storeInstance;
+}
+
+function saveStore(data: StoreData) {
+  const filePath = getStoragePath();
+  if (!filePath) return;
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('Could not write store to disk (running in memory):', err);
+  }
+}
+
+// ----------------- Data Access Helpers -----------------
+
+export function getRestaurantSettings(): RestaurantSettings {
+  return getStore().settings;
+}
+
+export function updateRestaurantSettings(data: Partial<RestaurantSettings>): void {
+  const store = getStore();
+  store.settings = {
+    ...store.settings,
+    ...data,
+    updated_at: new Date().toISOString(),
+  };
+  saveStore(store);
+}
+
+export function getCategories(onlyActive = false): Category[] {
+  const store = getStore();
+  let list = store.categories;
+  if (onlyActive) {
+    list = list.filter((c) => c.is_active);
+  }
+  return [...list].sort(
+    (a, b) => (a.display_order || 0) - (b.display_order || 0) || a.name.localeCompare(b.name)
+  );
+}
+
+export function getCategoryById(id: string): Category | null {
+  const store = getStore();
+  return store.categories.find((c) => c.id === id) || null;
+}
+
+export function createCategory(cat: {
+  name: string;
+  slug: string;
+  description?: string;
+  image_url?: string;
+  display_order?: number;
+  is_active?: boolean;
+}): Category {
+  const store = getStore();
+  const now = new Date().toISOString();
+  const newCat: Category = {
+    id: 'cat_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+    name: cat.name,
+    slug: cat.slug,
+    description: cat.description || '',
+    image_url: cat.image_url || '',
+    display_order: cat.display_order || 0,
+    is_active: cat.is_active !== false,
+    created_at: now,
+    updated_at: now,
+  };
+  store.categories.push(newCat);
+  saveStore(store);
+  return newCat;
+}
+
+export function updateCategory(id: string, cat: Partial<Category>): Category | null {
+  const store = getStore();
+  const idx = store.categories.findIndex((c) => c.id === id);
+  if (idx === -1) return null;
+
+  store.categories[idx] = {
+    ...store.categories[idx],
+    ...cat,
+    updated_at: new Date().toISOString(),
+  };
+  saveStore(store);
+  return store.categories[idx];
+}
+
+export function deleteCategory(id: string): boolean {
+  const store = getStore();
+  const initialLen = store.categories.length;
+  store.categories = store.categories.filter((c) => c.id !== id);
+  const deleted = store.categories.length < initialLen;
+  if (deleted) saveStore(store);
+  return deleted;
+}
+
+export function getProducts(options?: {
+  categoryId?: string;
+  categorySlug?: string;
+  onlyAvailable?: boolean;
+  featuredOnly?: boolean;
+  search?: string;
+}): Product[] {
+  const store = getStore();
+  let list = store.products;
+
+  if (options?.categoryId) {
+    list = list.filter((p) => p.category_id === options.categoryId);
+  }
+  if (options?.categorySlug) {
+    const cat = store.categories.find((c) => c.slug === options.categorySlug);
+    const catId = cat ? cat.id : '__no_match__';
+    list = list.filter((p) => p.category_id === catId);
+  }
+  if (options?.onlyAvailable) {
+    const activeCatIds = new Set(store.categories.filter((c) => c.is_active).map((c) => c.id));
+    list = list.filter((p) => p.is_available && activeCatIds.has(p.category_id));
+  }
+  if (options?.featuredOnly) {
+    list = list.filter((p) => p.is_featured);
+  }
+  if (options?.search) {
+    const q = options.search.toLowerCase();
+    list = list.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        (p.description && p.description.toLowerCase().includes(q))
+    );
+  }
+
+  const catMap = new Map(store.categories.map((c) => [c.id, c.name]));
+  return list
+    .map((p) => ({
+      ...p,
+      category_name: catMap.get(p.category_id) || '',
+    }))
+    .sort(
+      (a, b) => (a.display_order || 0) - (b.display_order || 0) || a.name.localeCompare(b.name)
+    );
+}
+
+export function getProductById(id: string): Product | null {
+  const store = getStore();
+  const prod = store.products.find((p) => p.id === id);
+  if (!prod) return null;
+  const cat = store.categories.find((c) => c.id === prod.category_id);
+  return {
+    ...prod,
+    category_name: cat?.name || '',
+  };
+}
+
+export function createProduct(prod: Omit<Product, 'id' | 'created_at' | 'updated_at'>): Product {
+  const store = getStore();
+  const now = new Date().toISOString();
+  const cat = store.categories.find((c) => c.id === prod.category_id);
+  const newProd: Product = {
+    ...prod,
+    id: 'prod_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+    category_name: cat?.name || '',
+    description: prod.description || '',
+    image_url: prod.image_url || '',
+    is_available: Boolean(prod.is_available),
+    is_featured: Boolean(prod.is_featured),
+    discount_percent: Number(prod.discount_percent) || 0,
+    display_order: Number(prod.display_order) || 0,
+    created_at: now,
+    updated_at: now,
+  };
+  store.products.push(newProd);
+  saveStore(store);
+  return newProd;
+}
+
+export function updateProduct(id: string, prod: Partial<Product>): Product | null {
+  const store = getStore();
+  const idx = store.products.findIndex((p) => p.id === id);
+  if (idx === -1) return null;
+
+  const existing = store.products[idx];
+  const catId = prod.category_id || existing.category_id;
+  const cat = store.categories.find((c) => c.id === catId);
+
+  store.products[idx] = {
+    ...existing,
+    ...prod,
+    category_id: catId,
+    category_name: cat?.name || existing.category_name,
+    price:
+      prod.price !== undefined && !isNaN(Number(prod.price))
+        ? Number(prod.price)
+        : existing.price,
+    discount_percent:
+      prod.discount_percent !== undefined && !isNaN(Number(prod.discount_percent))
+        ? Number(prod.discount_percent)
+        : existing.discount_percent || 0,
+    display_order:
+      prod.display_order !== undefined && !isNaN(Number(prod.display_order))
+        ? Number(prod.display_order)
+        : existing.display_order || 0,
+    is_available:
+      prod.is_available !== undefined ? Boolean(prod.is_available) : existing.is_available,
+    is_featured:
+      prod.is_featured !== undefined ? Boolean(prod.is_featured) : existing.is_featured,
+    updated_at: new Date().toISOString(),
+  };
+
+  saveStore(store);
+  return store.products[idx];
+}
+
+export function deleteProduct(id: string): boolean {
+  const store = getStore();
+  const initialLen = store.products.length;
+  store.products = store.products.filter((p) => p.id !== id);
+  const deleted = store.products.length < initialLen;
+  if (deleted) saveStore(store);
+  return deleted;
+}
+
+export function getDeliveryZones(onlyActive = true): DeliveryZone[] {
+  const store = getStore();
+  let list = store.delivery_zones;
+  if (onlyActive) list = list.filter((z) => z.is_active);
+  return [...list].sort((a, b) => a.fee - b.fee);
+}
+
+export function getDeliveryZoneById(id: string): DeliveryZone | null {
+  const store = getStore();
+  return store.delivery_zones.find((z) => z.id === id) || null;
+}
+
+// ----------------- Orders & Checkout -----------------
+
 export function createOrder(input: CreateOrderInput): { order: Order; error?: string } {
-  const db = getDb();
+  const store = getStore();
 
   if (!input.items || input.items.length === 0) {
     return { order: null as any, error: 'Your cart is empty.' };
   }
 
-  // Generate unique order number: e.g. TRP-104928
   const dateStr = Date.now().toString().slice(-6);
   const randomSuffix = Math.floor(10 + Math.random() * 90);
   const orderNumber = `TRP-${dateStr}${randomSuffix}`;
   const orderId = 'ord_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-  const trackingToken = 'trk_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+  const trackingToken =
+    'trk_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
   const now = new Date().toISOString();
 
-  // Validate and fetch each product price from authoritative database
   let subtotal = 0;
-  const verifiedItems: {
-    id: string;
-    product_id: string;
-    product_name: string;
-    price: number;
-    quantity: number;
-    variant_name?: string;
-    addons_json?: string;
-    line_total: number;
-  }[] = [];
+  const verifiedItems: OrderItem[] = [];
 
   for (const item of input.items) {
     if (item.quantity <= 0) continue;
@@ -633,16 +451,17 @@ export function createOrder(input: CreateOrderInput): { order: Order; error?: st
       return { order: null as any, error: `Product is currently unavailable: ${prod.name}` };
     }
 
-    // Apply discount if any
-    const unitPrice = prod.discount_percent > 0
-      ? prod.price * (1 - prod.discount_percent / 100)
-      : prod.price;
+    const unitPrice =
+      prod.discount_percent > 0
+        ? prod.price * (1 - prod.discount_percent / 100)
+        : prod.price;
 
     const lineTotal = unitPrice * item.quantity;
     subtotal += lineTotal;
 
     verifiedItems.push({
       id: 'item_' + Math.random().toString(36).substring(2, 9),
+      order_id: orderId,
       product_id: prod.id,
       product_name: prod.name,
       price: unitPrice,
@@ -657,7 +476,6 @@ export function createOrder(input: CreateOrderInput): { order: Order; error?: st
     return { order: null as any, error: 'No valid items found in order.' };
   }
 
-  // Calculate delivery fee
   let deliveryFee = 0;
   let zoneName = '';
   if (input.delivery_type === 'Delivery') {
@@ -668,7 +486,6 @@ export function createOrder(input: CreateOrderInput): { order: Order; error?: st
         zoneName = zone.name;
       }
     } else {
-      // Default nearby fee
       deliveryFee = 100;
       zoneName = 'Standard Delivery';
     }
@@ -682,101 +499,52 @@ export function createOrder(input: CreateOrderInput): { order: Order; error?: st
       ? 'Cash on Delivery'
       : 'Pending Verification';
 
-  const orderStatus: OrderStatus = 'Pending';
+  const newOrder: Order = {
+    id: orderId,
+    order_number: orderNumber,
+    customer_name: input.customer_name,
+    customer_phone: input.customer_phone,
+    delivery_type: input.delivery_type,
+    delivery_address: input.delivery_address || '',
+    delivery_zone_id: input.delivery_zone_id || '',
+    delivery_zone_name: zoneName,
+    delivery_fee: deliveryFee,
+    subtotal,
+    discount,
+    total,
+    payment_method: input.payment_method,
+    payment_status: paymentStatus,
+    order_status: 'Pending',
+    notes: input.notes || '',
+    transaction_ref: input.transaction_ref || '',
+    payment_proof_url: input.payment_proof_url || '',
+    tracking_token: trackingToken,
+    items: verifiedItems,
+    created_at: now,
+    updated_at: now,
+  };
 
-  // Atomic database transaction
-  const executeOrderTransaction = db.transaction(() => {
-    db.prepare(`
-      INSERT INTO orders (
-        id, order_number, customer_name, customer_phone, delivery_type,
-        delivery_address, delivery_zone_id, delivery_zone_name, delivery_fee,
-        subtotal, discount, total, payment_method, payment_status, order_status,
-        notes, transaction_ref, payment_proof_url, tracking_token, created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?
-      )
-    `).run(
-      orderId,
-      orderNumber,
-      input.customer_name,
-      input.customer_phone,
-      input.delivery_type,
-      input.delivery_address || '',
-      input.delivery_zone_id || '',
-      zoneName,
-      deliveryFee,
-      subtotal,
-      discount,
-      total,
-      input.payment_method,
-      paymentStatus,
-      orderStatus,
-      input.notes || '',
-      input.transaction_ref || '',
-      input.payment_proof_url || '',
-      trackingToken,
-      now,
-      now
-    );
+  store.orders.unshift(newOrder);
+  saveStore(store);
 
-    const insertItemStmt = db.prepare(`
-      INSERT INTO order_items (
-        id, order_id, product_id, product_name, price, quantity,
-        variant_name, addons_json, line_total
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    for (const it of verifiedItems) {
-      insertItemStmt.run(
-        it.id,
-        orderId,
-        it.product_id,
-        it.product_name,
-        it.price,
-        it.quantity,
-        it.variant_name,
-        it.addons_json,
-        it.line_total
-      );
-    }
-  });
-
-  executeOrderTransaction();
-
-  const fullOrder = getOrderById(orderId);
-  return { order: fullOrder! };
+  return { order: newOrder };
 }
 
 export function getOrderById(id: string): Order | null {
-  const db = getDb();
-  const orderRow = db.prepare('SELECT * FROM orders WHERE id = ?').get(id) as any;
-  if (!orderRow) return null;
-
-  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id) as OrderItem[];
-  return {
-    ...orderRow,
-    items,
-  };
+  const store = getStore();
+  return store.orders.find((o) => o.id === id) || null;
 }
 
 export function getOrderByTracking(identifier: string): Order | null {
-  const db = getDb();
-  // Find by order number (e.g. TRP-123456) or tracking_token
-  const orderRow = db.prepare(`
-    SELECT * FROM orders
-    WHERE order_number = ? OR tracking_token = ?
-    LIMIT 1
-  `).get(identifier.trim(), identifier.trim()) as any;
-
-  if (!orderRow) return null;
-  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderRow.id) as OrderItem[];
-  return {
-    ...orderRow,
-    items,
-  };
+  const store = getStore();
+  const trimmed = identifier.trim();
+  return (
+    store.orders.find(
+      (o) =>
+        o.order_number.toUpperCase() === trimmed.toUpperCase() ||
+        o.tracking_token === trimmed
+    ) || null
+  );
 }
 
 export function getOrders(options?: {
@@ -786,106 +554,125 @@ export function getOrders(options?: {
   limit?: number;
   offset?: number;
 }): { orders: Order[]; totalCount: number } {
-  const db = getDb();
-  let where = 'WHERE 1=1';
-  const params: any[] = [];
+  const store = getStore();
+  let list = store.orders;
 
   if (options?.status) {
-    where += ' AND order_status = ?';
-    params.push(options.status);
+    list = list.filter((o) => o.order_status === options.status);
   }
   if (options?.paymentStatus) {
-    where += ' AND payment_status = ?';
-    params.push(options.paymentStatus);
+    list = list.filter((o) => o.payment_status === options.paymentStatus);
   }
   if (options?.search) {
-    where += ' AND (order_number LIKE ? OR customer_name LIKE ? OR customer_phone LIKE ?)';
-    const s = `%${options.search}%`;
-    params.push(s, s, s);
+    const s = options.search.toLowerCase();
+    list = list.filter(
+      (o) =>
+        o.order_number.toLowerCase().includes(s) ||
+        o.customer_name.toLowerCase().includes(s) ||
+        o.customer_phone.includes(s)
+    );
   }
 
-  const countRow = db.prepare(`SELECT count(*) as count FROM orders ${where}`).get(...params) as { count: number };
-  const totalCount = countRow.count;
+  const totalCount = list.length;
+  const offset = options?.offset || 0;
+  const limit = options?.limit || list.length;
+  const paginated = list.slice(offset, offset + limit);
 
-  let sql = `SELECT * FROM orders ${where} ORDER BY created_at DESC`;
-  if (options?.limit) {
-    sql += ` LIMIT ${options.limit}`;
-    if (options.offset) sql += ` OFFSET ${options.offset}`;
-  }
-
-  const orderRows = db.prepare(sql).all(...params) as any[];
-
-  // Fetch items for these orders
-  const orders: Order[] = orderRows.map(o => {
-    const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(o.id) as OrderItem[];
-    return { ...o, items };
-  });
-
-  return { orders, totalCount };
+  return { orders: paginated, totalCount };
 }
 
-export function updateOrderStatus(orderId: string, status: OrderStatus, adminEmail = 'admin'): Order | null {
-  const db = getDb();
-  const now = new Date().toISOString();
-  db.prepare('UPDATE orders SET order_status = ?, updated_at = ? WHERE id = ?').run(status, now, orderId);
+export function updateOrderStatus(
+  orderId: string,
+  status: OrderStatus,
+  adminEmail = 'admin'
+): Order | null {
+  const store = getStore();
+  const order = store.orders.find((o) => o.id === orderId);
+  if (!order) return null;
 
+  order.order_status = status;
+  order.updated_at = new Date().toISOString();
   createAuditLog('admin', adminEmail, 'UPDATE_ORDER_STATUS', `Changed status of order ${orderId} to ${status}`);
-  return getOrderById(orderId);
+  saveStore(store);
+  return order;
 }
 
-export function updatePaymentStatus(orderId: string, status: PaymentStatus, adminEmail = 'admin'): Order | null {
-  const db = getDb();
-  const now = new Date().toISOString();
-  db.prepare('UPDATE orders SET payment_status = ?, updated_at = ? WHERE id = ?').run(status, now, orderId);
+export function updatePaymentStatus(
+  orderId: string,
+  status: PaymentStatus,
+  adminEmail = 'admin'
+): Order | null {
+  const store = getStore();
+  const order = store.orders.find((o) => o.id === orderId);
+  if (!order) return null;
 
+  order.payment_status = status;
+  order.updated_at = new Date().toISOString();
   createAuditLog('admin', adminEmail, 'UPDATE_PAYMENT_STATUS', `Changed payment status of order ${orderId} to ${status}`);
-  return getOrderById(orderId);
+  saveStore(store);
+  return order;
 }
 
 // ----------------- Analytics & Reporting -----------------
 
 export function getDashboardAnalytics() {
-  const db = getDb();
+  const store = getStore();
+  const orders = store.orders;
 
-  // Summary counts
-  const totalOrders = (db.prepare('SELECT count(*) as count FROM orders').get() as any).count;
-  const pendingOrders = (db.prepare("SELECT count(*) as count FROM orders WHERE order_status = 'Pending'").get() as any).count;
-  const preparingOrders = (db.prepare("SELECT count(*) as count FROM orders WHERE order_status = 'Preparing'").get() as any).count;
-  const completedOrders = (db.prepare("SELECT count(*) as count FROM orders WHERE order_status IN ('Delivered', 'Completed')").get() as any).count;
-  const cancelledOrders = (db.prepare("SELECT count(*) as count FROM orders WHERE order_status = 'Cancelled'").get() as any).count;
-  const pendingPayments = (db.prepare("SELECT count(*) as count FROM orders WHERE payment_status = 'Pending Verification'").get() as any).count;
+  const totalOrders = orders.length;
+  const pendingOrders = orders.filter((o) => o.order_status === 'Pending').length;
+  const preparingOrders = orders.filter((o) => o.order_status === 'Preparing').length;
+  const completedOrders = orders.filter(
+    (o) => o.order_status === 'Delivered' || o.order_status === 'Completed'
+  ).length;
+  const cancelledOrders = orders.filter((o) => o.order_status === 'Cancelled').length;
+  const pendingPayments = orders.filter(
+    (o) => o.payment_status === 'Pending Verification'
+  ).length;
 
-  // Revenue (excluding cancelled orders)
-  const totalRevenueRow = db.prepare("SELECT sum(total) as revenue FROM orders WHERE order_status != 'Cancelled'").get() as any;
-  const totalRevenue = totalRevenueRow?.revenue || 0;
+  const nonCancelled = orders.filter((o) => o.order_status !== 'Cancelled');
+  const totalRevenue = nonCancelled.reduce((acc, o) => acc + (o.total || 0), 0);
 
-  // Today's orders and revenue
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const todayIso = todayStart.toISOString();
-
-  const todayOrders = (db.prepare('SELECT count(*) as count FROM orders WHERE created_at >= ?').get(todayIso) as any).count;
-  const todayRevenueRow = db.prepare("SELECT sum(total) as revenue FROM orders WHERE created_at >= ? AND order_status != 'Cancelled'").get(todayIso) as any;
-  const todayRevenue = todayRevenueRow?.revenue || 0;
+  const todayOrdersList = orders.filter((o) => new Date(o.created_at) >= todayStart);
+  const todayOrders = todayOrdersList.length;
+  const todayRevenue = todayOrdersList
+    .filter((o) => o.order_status !== 'Cancelled')
+    .reduce((acc, o) => acc + (o.total || 0), 0);
 
   // Best selling products
-  const topProducts = db.prepare(`
-    SELECT oi.product_name, sum(oi.quantity) as total_sold, sum(oi.line_total) as total_revenue
-    FROM order_items oi
-    JOIN orders o ON oi.order_id = o.id
-    WHERE o.order_status != 'Cancelled'
-    GROUP BY oi.product_name
-    ORDER BY total_sold DESC
-    LIMIT 6
-  `).all();
+  const productSalesMap = new Map<string, { total_sold: number; total_revenue: number }>();
+  for (const o of nonCancelled) {
+    if (o.items) {
+      for (const it of o.items) {
+        const cur = productSalesMap.get(it.product_name) || { total_sold: 0, total_revenue: 0 };
+        cur.total_sold += it.quantity;
+        cur.total_revenue += it.line_total;
+        productSalesMap.set(it.product_name, cur);
+      }
+    }
+  }
 
-  // Recent 6 orders
-  const recentOrders = db.prepare(`
-    SELECT id, order_number, customer_name, total, payment_method, payment_status, order_status, created_at
-    FROM orders
-    ORDER BY created_at DESC
-    LIMIT 6
-  `).all();
+  const topProducts = Array.from(productSalesMap.entries())
+    .map(([product_name, stats]) => ({
+      product_name,
+      total_sold: stats.total_sold,
+      total_revenue: stats.total_revenue,
+    }))
+    .sort((a, b) => b.total_sold - a.total_sold)
+    .slice(0, 6);
+
+  const recentOrders = orders.slice(0, 6).map((o) => ({
+    id: o.id,
+    order_number: o.order_number,
+    customer_name: o.customer_name,
+    total: o.total,
+    payment_method: o.payment_method,
+    payment_status: o.payment_status,
+    order_status: o.order_status,
+    created_at: o.created_at,
+  }));
 
   return {
     totalOrders,
@@ -905,27 +692,119 @@ export function getDashboardAnalytics() {
 // ----------------- Admin Auth & Logs -----------------
 
 export function getAdminByEmail(email: string): (AdminUser & { password_hash: string }) | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM admin_users WHERE email = ?').get(email) as any;
-  if (!row) return null;
-  return row;
+  const store = getStore();
+  return (
+    store.admin_users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase()) || null
+  );
 }
 
 export function updateAdminLastLogin(id: string): void {
-  const db = getDb();
-  db.prepare('UPDATE admin_users SET last_login = ? WHERE id = ?').run(new Date().toISOString(), id);
+  const store = getStore();
+  const user = store.admin_users.find((u) => u.id === id);
+  if (user) {
+    user.last_login = new Date().toISOString();
+    saveStore(store);
+  }
 }
 
-export function createAuditLog(adminId: string, adminEmail: string, action: string, details: string, ip?: string): void {
-  const db = getDb();
-  const id = 'log_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-  db.prepare(`
-    INSERT INTO audit_logs (id, admin_id, admin_email, action, details, ip_address)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, adminId, adminEmail, action, details, ip || '');
+export function createAuditLog(
+  adminId: string,
+  adminEmail: string,
+  action: string,
+  details: string,
+  ip?: string
+): void {
+  const store = getStore();
+  const newLog: AdminAuditLog = {
+    id: 'log_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+    admin_id: adminId,
+    admin_email: adminEmail,
+    action,
+    details,
+    ip_address: ip || '',
+    created_at: new Date().toISOString(),
+  };
+  store.audit_logs.unshift(newLog);
+  if (store.audit_logs.length > 200) {
+    store.audit_logs = store.audit_logs.slice(0, 200);
+  }
+  saveStore(store);
 }
 
 export function getAuditLogs(limit = 50): AdminAuditLog[] {
-  const db = getDb();
-  return db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?').all(limit) as AdminAuditLog[];
+  const store = getStore();
+  return store.audit_logs.slice(0, limit);
+}
+
+
+export function getDetailedAnalytics(range = '30d') {
+  const store = getStore();
+  const now = new Date();
+  const startDate = new Date();
+  if (range === '7d') {
+    startDate.setDate(now.getDate() - 7);
+  } else if (range === '90d') {
+    startDate.setDate(now.getDate() - 90);
+  } else {
+    startDate.setDate(now.getDate() - 30);
+  }
+
+  const filteredOrders = store.orders.filter(
+    (o) => new Date(o.created_at) >= startDate
+  );
+
+  const nonCancelled = filteredOrders.filter((o) => o.order_status !== 'Cancelled');
+
+  const trendMap = new Map<string, { date: string; orders_count: number; revenue: number }>();
+  for (const o of nonCancelled) {
+    const d = o.created_at.slice(0, 10);
+    const cur = trendMap.get(d) || { date: d, orders_count: 0, revenue: 0 };
+    cur.orders_count += 1;
+    cur.revenue += o.total;
+    trendMap.set(d, cur);
+  }
+  const dailyTrends = Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  const payMap = new Map<string, { payment_method: string; count: number; total_amount: number }>();
+  for (const o of nonCancelled) {
+    const m = o.payment_method || 'Cash on Delivery';
+    const cur = payMap.get(m) || { payment_method: m, count: 0, total_amount: 0 };
+    cur.count += 1;
+    cur.total_amount += o.total;
+    payMap.set(m, cur);
+  }
+  const paymentBreakdown = Array.from(payMap.values());
+
+  const statusMap = new Map<string, { order_status: string; count: number }>();
+  for (const o of filteredOrders) {
+    const s = o.order_status || 'Pending';
+    const cur = statusMap.get(s) || { order_status: s, count: 0 };
+    cur.count += 1;
+    statusMap.set(s, cur);
+  }
+  const statusBreakdown = Array.from(statusMap.values());
+
+  const periodRevenue = nonCancelled.reduce((acc, o) => acc + o.total, 0);
+  const periodOrders = nonCancelled.length;
+  const aov = periodOrders > 0 ? Math.round(periodRevenue / periodOrders) : 0;
+
+  return {
+    dailyTrends,
+    paymentBreakdown,
+    statusBreakdown,
+    aov,
+    periodRevenue,
+    periodOrders,
+  };
+}
+
+export function getAllOrdersForCsv(): string {
+  const store = getStore();
+  let csv =
+    'Order Number,Customer Name,Phone,Type,Subtotal (PKR),Delivery Fee (PKR),Total (PKR),Payment Method,Payment Status,Order Status,Date\n';
+  const clean = (val: any) => `"${String(val || '').replace(/"/g, '""')}"`;
+  for (const o of store.orders) {
+    csv += `${clean(o.order_number)},${clean(o.customer_name)},${clean(o.customer_phone)},${clean(o.delivery_type)},${o.subtotal},${o.delivery_fee},${o.total},${clean(o.payment_method)},${clean(o.payment_status)},${clean(o.order_status)},${clean(o.created_at)}\n`;
+  }
+  return csv;
 }

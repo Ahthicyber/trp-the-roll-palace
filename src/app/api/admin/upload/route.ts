@@ -34,20 +34,25 @@ export async function POST(request: Request) {
       );
     }
 
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-
+    let publicUrl = '';
     const ext = path.extname(file.name) || '.jpg';
     const cleanBase = path.basename(file.name, ext).replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
     const uniqueName = `trp_${Date.now()}_${cleanBase}${ext}`;
-    const filePath = path.join(uploadDir, uniqueName);
-
     const buffer = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(filePath, buffer);
 
-    const publicUrl = `/uploads/${uniqueName}`;
+    try {
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const filePath = path.join(uploadDir, uniqueName);
+      fs.writeFileSync(filePath, buffer);
+      publicUrl = `/uploads/${uniqueName}`;
+    } catch {
+      // In serverless environments (AWS Lambda / Netlify) where filesystem is read-only, use data URL
+      const mime = file.type || 'image/jpeg';
+      publicUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+    }
 
     return NextResponse.json({
       success: true,
@@ -59,4 +64,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
-
