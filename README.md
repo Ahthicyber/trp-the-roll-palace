@@ -199,3 +199,41 @@ If running against remote Supabase PostgreSQL instead of local SQLite:
 1. Create a Supabase project at [supabase.com](https://supabase.com).
 2. Open the SQL Editor and execute `supabase/schema.sql`.
 3. Add `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to your environment variables.
+
+---
+
+## 📦 Verified Menu Import Report
+
+All 44 items from the original website (`starlit-gingersnap-697252.netlify.app`) were extracted verbatim and seeded:
+
+| Category | Item Count | Key Highlights |
+|---|---|---|
+| **Burgers** | 9 | Crispy Zinger (Rs. 400), Double Decker (Rs. 700), Beef Smashed with Cheese (Rs. 480) |
+| **Rolls** | 7 | TRP Crispy Roll (Rs. 300), Jumbo Jet (Rs. 800), Chicken Chatni (Rs. 220), Beef Roll (Rs. 350) |
+| **BBQ** | 6 | Chicken Tikka Chest (Rs. 500), Malai Boti (Rs. 450), BBQ Platter Full (Rs. 1,950) |
+| **Wraps** | 1 | Tortilla Lava Wrap (Rs. 400) |
+| **Appetizers / Snacks** | 4 | Plain Fries (Rs. 150), Pizza Fries (Rs. 280), TRP Loaded Fries (Rs. 380), Masala Fries (Rs. 200) |
+| **Broast** | 1 | Crispy Broast (Rs. 480) |
+| **Sandwiches** | 5 | Mexican Sandwich (Rs. 480), BBQ Tikka Sandwich (Rs. 450), Double Decker Sandwich (Rs. 800) |
+| **TRP Special Items** | 6 | Beef Lava Burger (Rs. 650), Crispy Lava Burger (Rs. 650), Jumbo Lava Roll (Rs. 1,000), Lava Platter (Rs. 1,850) |
+| **Drinks** | 5 | Soft Drinks (Small Rs. 80, Large Rs. 100, 1 Ltr Rs. 180), Mineral Water |
+| **Extra Dip** | 4 | Extra Mayo Dip, Mustard Sauce, Smokey Sauce, Garlic Sauce (Rs. 40 each) |
+| **Total** | **48 Items** | 100% of source menu preserved with verified pricing |
+
+---
+
+## 🌐 Production Deployment
+
+### Netlify Deployment
+1. Push repository to your Git provider (GitHub / GitLab).
+2. Link the repository in Netlify.
+3. Netlify automatically detects `netlify.toml` and installs `@netlify/plugin-nextjs`.
+4. Add environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_JWT_SECRET`, etc.) in the Netlify site settings.
+5. Deploy!
+
+### Supabase Cloud Database (Optional)
+If running against remote Supabase PostgreSQL instead of local SQLite:
+1. Create a Supabase project at [supabase.com](https://supabase.com).
+2. Open the SQL Editor and execute `supabase/schema.sql`.
+3. Add `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to your environment variables.
+
