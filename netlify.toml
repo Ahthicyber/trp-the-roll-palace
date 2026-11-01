@@ -7,4 +7,8 @@
 
 [build.environment]
   NODE_VERSION = "20"
-
+  ADMIN_EMAIL = "admin@trp.com"
+  ADMIN_PASSWORD = "RollPalace#2026!"
+  ADMIN_JWT_SECRET = "trp-roll-palace-secure-jwt-super-secret-key-2026"
+  NEXT_PUBLIC_RESTAURANT_WHATSAPP = "923243235253"
+  NEXT_PUBLIC_RESTAURANT_PHONE = "03243235253"
