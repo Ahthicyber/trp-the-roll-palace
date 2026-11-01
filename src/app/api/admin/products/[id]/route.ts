@@ -13,7 +13,7 @@ export async function GET(
     }
 
     const { id } = await params;
-    const product = getProductById(id);
+    const product = await getProductById(id);
     if (!product) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
@@ -42,13 +42,13 @@ export async function PUT(
     if (body.discount_percent !== undefined) cleanUpdates.discount_percent = parseFloat(body.discount_percent);
     if (body.display_order !== undefined) cleanUpdates.display_order = parseInt(body.display_order);
 
-    const updated = updateProduct(id, cleanUpdates);
+    const updated = await updateProduct(id, cleanUpdates);
 
     if (!updated) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
 
-    createAuditLog(
+    await createAuditLog(
       session.userId,
       session.email,
       'UPDATE_PRODUCT',
@@ -72,14 +72,14 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    const existing = getProductById(id);
-    const success = deleteProduct(id);
+    const existing = await getProductById(id);
+    const success = await deleteProduct(id);
 
     if (!success) {
       return NextResponse.json({ error: 'Product not found or could not be deleted' }, { status: 404 });
     }
 
-    createAuditLog(
+    await createAuditLog(
       session.userId,
       session.email,
       'DELETE_PRODUCT',

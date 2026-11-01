@@ -12,7 +12,7 @@ import CartDrawer from '@/components/CartDrawer';
 export const dynamic = 'force-dynamic';
 
 export async function generateMetadata(): Promise<Metadata> {
-  const settings = getRestaurantSettings();
+  const settings = await getRestaurantSettings();
   return {
     title: `${settings.name} — ${settings.tagline} | Online Ordering`,
     description: `Order Karachi's best rolls, crispy zinger burgers, molten lava burgers, charcoal BBQ, and fries directly from ${settings.name}. Delivery available until 3:00 AM!`,
@@ -25,9 +25,9 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function HomePage() {
-  const categories = getCategories(true);
-  const products = getProducts({ onlyAvailable: true });
-  const deliveryZones = getDeliveryZones(true);
+  const categories = await getCategories(true);
+  const products = await getProducts({ onlyAvailable: true });
+  const deliveryZones = await getDeliveryZones(true);
 
   return (
     <CartProvider>

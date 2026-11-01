@@ -9,7 +9,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const categories = getCategories(false);
+    const categories = await getCategories(false);
     return NextResponse.json({ categories });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     }
 
     const slug = body.slug || body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    const category = createCategory({
+    const category = await createCategory({
       name: body.name,
       slug,
       description: body.description || '',
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
       is_active: body.is_active !== false,
     });
 
-    createAuditLog(
+    await createAuditLog(
       session.userId,
       session.email,
       'CREATE_CATEGORY',

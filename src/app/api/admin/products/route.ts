@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     const categoryId = searchParams.get('categoryId') || undefined;
     const search = searchParams.get('search') || undefined;
 
-    const products = getProducts({
+    const products = await getProducts({
       categoryId,
       search,
       onlyAvailable: false,
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
 
     const slug = body.slug || body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
 
-    const product = createProduct({
+    const product = await createProduct({
       category_id: body.category_id,
       name: body.name,
       slug,
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       display_order: body.display_order ? parseInt(body.display_order) : 0,
     });
 
-    createAuditLog(
+    await createAuditLog(
       session.userId,
       session.email,
       'CREATE_PRODUCT',

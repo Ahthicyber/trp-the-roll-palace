@@ -41,7 +41,7 @@ export async function getAdminSession(): Promise<AdminSessionPayload | null> {
 
 export async function loginAdmin(email: string, password: string, ip?: string): Promise<{ success: boolean; error?: string; user?: AdminUser }> {
   const cleanEmail = email.trim().toLowerCase();
-  const admin = getAdminByEmail(cleanEmail);
+  const admin = await getAdminByEmail(cleanEmail);
 
   if (!admin) {
     return { success: false, error: 'Invalid email or password.' };
@@ -49,12 +49,12 @@ export async function loginAdmin(email: string, password: string, ip?: string): 
 
   const isPasswordValid = bcrypt.compareSync(password, admin.password_hash);
   if (!isPasswordValid) {
-    createAuditLog(admin.id, admin.email, 'LOGIN_FAILED', 'Failed password attempt', ip);
+    await createAuditLog(admin.id, admin.email, 'LOGIN_FAILED', 'Failed password attempt', ip);
     return { success: false, error: 'Invalid email or password.' };
   }
 
-  updateAdminLastLogin(admin.id);
-  createAuditLog(admin.id, admin.email, 'LOGIN_SUCCESS', 'Admin logged in successfully', ip);
+  await updateAdminLastLogin(admin.id);
+  await createAuditLog(admin.id, admin.email, 'LOGIN_SUCCESS', 'Admin logged in successfully', ip);
 
   const token = await signAdminToken({
     userId: admin.id,
@@ -88,7 +88,7 @@ export async function loginAdmin(email: string, password: string, ip?: string): 
 export async function logoutAdmin(ip?: string): Promise<void> {
   const session = await getAdminSession();
   if (session) {
-    createAuditLog(session.userId, session.email, 'LOGOUT', 'Admin logged out', ip);
+    await createAuditLog(session.userId, session.email, 'LOGOUT', 'Admin logged out', ip);
   }
   const cookieStore = await cookies();
   cookieStore.delete(COOKIE_NAME);

@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = createOrder(validatedData.data);
+    const result = await createOrder(validatedData.data);
     if (result.error || !result.order) {
       return NextResponse.json(
         { error: result.error || 'Failed to process order' },
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Tracking number is required.' }, { status: 400 });
     }
 
-    const order = getOrderByTracking(tracking);
+    const order = await getOrderByTracking(tracking);
     if (!order) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     }

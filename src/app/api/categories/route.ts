@@ -3,7 +3,7 @@ import { getCategories } from '@/lib/db';
 
 export async function GET() {
   try {
-    const categories = getCategories(true);
+    const categories = await getCategories(true);
     return NextResponse.json({ categories });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

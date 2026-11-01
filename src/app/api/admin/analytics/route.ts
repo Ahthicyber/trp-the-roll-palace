@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const range = searchParams.get('range') || '30d';
 
     if (format === 'csv') {
-      const csv = getAllOrdersForCsv();
+      const csv = await getAllOrdersForCsv();
       return new Response(csv, {
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
@@ -23,8 +23,8 @@ export async function GET(request: Request) {
       });
     }
 
-    const dashboard = getDashboardAnalytics();
-    const detailed = getDetailedAnalytics(range);
+    const dashboard = await getDashboardAnalytics();
+    const detailed = await getDetailedAnalytics(range);
 
     return NextResponse.json({
       dashboard,

@@ -12,3 +12,5 @@
   ADMIN_JWT_SECRET = "trp-roll-palace-secure-jwt-super-secret-key-2026"
   NEXT_PUBLIC_RESTAURANT_WHATSAPP = "923243235253"
   NEXT_PUBLIC_RESTAURANT_PHONE = "03243235253"
+  NEXT_PUBLIC_SUPABASE_URL = "https://pvghnyaoelbdnrrpdffh.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_kDGgGc7EaaTF2FlnoAKD-g_oOFdHSWx"

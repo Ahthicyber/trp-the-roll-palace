@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     const search = searchParams.get('search') || undefined;
     const featured = searchParams.get('featured') === 'true';
 
-    const products = getProducts({
+    const products = await getProducts({
       categorySlug,
       categoryId,
       search,

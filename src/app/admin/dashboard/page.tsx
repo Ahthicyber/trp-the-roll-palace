@@ -16,8 +16,8 @@ import { getDashboardAnalytics, getProducts } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 
 export default async function AdminDashboardPage() {
-  const analytics = getDashboardAnalytics();
-  const allProducts = getProducts({ onlyAvailable: false });
+  const analytics = await getDashboardAnalytics();
+  const allProducts = await getProducts({ onlyAvailable: false });
 
   return (
     <div className="space-y-8 animate-fadeIn">

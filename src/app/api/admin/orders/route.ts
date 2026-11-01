@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 50;
     const offset = searchParams.get('offset') ? parseInt(searchParams.get('offset')!) : 0;
 
-    const result = getOrders({
+    const result = await getOrders({
       status,
       paymentStatus,
       search,

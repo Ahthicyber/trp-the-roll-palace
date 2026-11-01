@@ -14,7 +14,7 @@ export async function GET(
     }
 
     const { id } = await params;
-    const order = getOrderById(id);
+    const order = await getOrderById(id);
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
@@ -41,11 +41,11 @@ export async function PATCH(
     let updatedOrder = null;
 
     if (body.order_status) {
-      updatedOrder = updateOrderStatus(id, body.order_status as OrderStatus, session.email);
+      updatedOrder = await updateOrderStatus(id, body.order_status as OrderStatus, session.email);
     }
 
     if (body.payment_status) {
-      updatedOrder = updatePaymentStatus(id, body.payment_status as PaymentStatus, session.email);
+      updatedOrder = await updatePaymentStatus(id, body.payment_status as PaymentStatus, session.email);
     }
 
     if (!updatedOrder) {

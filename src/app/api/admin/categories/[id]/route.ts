@@ -13,7 +13,7 @@ export async function GET(
     }
 
     const { id } = await params;
-    const category = getCategoryById(id);
+    const category = await getCategoryById(id);
     if (!category) {
       return NextResponse.json({ error: 'Category not found' }, { status: 404 });
     }
@@ -37,7 +37,7 @@ export async function PUT(
     const { id } = await params;
     const body = await request.json();
 
-    const updated = updateCategory(id, {
+    const updated = await updateCategory(id, {
       ...body,
       display_order: body.display_order !== undefined ? parseInt(body.display_order) : undefined,
     });
@@ -46,7 +46,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Category not found' }, { status: 404 });
     }
 
-    createAuditLog(
+    await createAuditLog(
       session.userId,
       session.email,
       'UPDATE_CATEGORY',
@@ -70,14 +70,14 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    const existing = getCategoryById(id);
-    const success = deleteCategory(id);
+    const existing = await getCategoryById(id);
+    const success = await deleteCategory(id);
 
     if (!success) {
       return NextResponse.json({ error: 'Category not found or could not be deleted' }, { status: 404 });
     }
 
-    createAuditLog(
+    await createAuditLog(
       session.userId,
       session.email,
       'DELETE_CATEGORY',

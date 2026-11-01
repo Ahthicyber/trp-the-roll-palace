@@ -9,7 +9,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const settings = getRestaurantSettings();
+    const settings = await getRestaurantSettings();
     return NextResponse.json({ settings });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -24,16 +24,16 @@ export async function PUT(request: Request) {
     }
 
     const body = await request.json();
-    updateRestaurantSettings(body);
+    await updateRestaurantSettings(body);
 
-    createAuditLog(
+    await createAuditLog(
       session.userId,
       session.email,
       'UPDATE_SETTINGS',
       'Updated restaurant settings'
     );
 
-    const updated = getRestaurantSettings();
+    const updated = await getRestaurantSettings();
     return NextResponse.json({ success: true, settings: updated });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
